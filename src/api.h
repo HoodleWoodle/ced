@@ -1,3 +1,6 @@
+#ifndef CED_API_H
+#define CED_API_H
+
 #include "common.h"
 
 namespace ced {
@@ -25,3 +28,5 @@ namespace ced {
 
     error_t write(seg_t, slice_t);
 }
+
+#endif // CED_API_H
