@@ -1,0 +1,4 @@
+[submodule "lib/zwerg"]
+	path = lib/zwerg
+	url = git@github.com:HoodleWoodle/zwerg.git
+	branch = feature/lib
