@@ -6,7 +6,7 @@
 namespace ced::gui {
     static const char* FONT_VISIBLE_CHARACTERS = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
-    static const char* FONT_FILE = "fonts/Share_Tech_Mono/ShareTechMono-Regular.ttf";
+    static const char* FONT_FILE = "fonts/IBM_Plex_Mono/IBMPlexMono-Regular.ttf";
     static const u64   FONT_SIZE = 28;
 
     static const color_t COLOR_BG = { 0.25f, 0.30f, 0.25f, 1.0f };
