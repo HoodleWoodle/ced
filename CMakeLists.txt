@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
 
-set(CMAKE_C_COMPILER zig cc)
-set(CMAKE_CPP_COMPILER zig c++)
-
 project(ced)
 
 add_subdirectory(lib/zwerg/)
