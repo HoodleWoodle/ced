@@ -9,9 +9,10 @@ file(GLOB_RECURSE CFILES ${CMAKE_SOURCE_DIR}/*.c)
 
 include_directories(src/)
 add_executable(${PROJECT_NAME}
-	src/common.h
+ 	src/common.h
 	src/doc.h
- 	src/gui.c
+ 	src/ui.h
+ 	src/ui.c
 	src/main.c
 )
 target_link_libraries(${PROJECT_NAME} zwerg)

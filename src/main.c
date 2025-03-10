@@ -1,29 +1,27 @@
-#include "gui.h"
+#include "doc.h"
+#include "ui.h"
 
 using namespace ced;
 
 int main(int argc, char** argv) {
-	gui::init();
+	// TODO: IMPL: argument parsing
+	const char* filepath = argv[1];
 
-	while (!gui::is_closed()) {
-		gui::frame_begin();
+	doc::seg_t seg;
+	doc::open(filepath, &seg);
 
-		const char* text =
-			"\n"
-			"# build & run\n"
-			"## ubuntusway\n"
-			"```bash\n"
-			"DIR_BUILD=.build \\\n"
-			"	&& cmake -B $DIR_BUILD \\\n"
-			"	&& make -j8 -C $DIR_BUILD \\\n"
-			"	&& $DIR_BUILD/ced\n"
-			"```"
-		;
-		gui::text(text);
+	ui::init();
+	while (!ui::is_closed()) {
+		ui::frame_begin();
 
-		gui::frame_end();
+		doc::iter_t it;
+		doc::iter(seg, &it);
+		ui::panel(&it);
+
+		ui::frame_end();
 	}
+	ui::deinit();
 
-	gui::deinit();
+	doc::close(seg);
 	return 0;
 }
