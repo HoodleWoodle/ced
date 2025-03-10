@@ -5,6 +5,9 @@
 git submodule init
 git submodule update
 
+# install important dev libraries
+sudo apt install libwayland-dev libxkbcommon-dev xorg-dev # on ubuntusway
+
 # build & run
 DIR_BUILD=.build \
     && cmake -B $DIR_BUILD \
