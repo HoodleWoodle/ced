@@ -59,20 +59,44 @@ namespace ced::ui {
         bool soft_wrap;
     } cfg_panel_t;
 
+    typedef struct {
+        float size_y;
+        float size_x_num;
+    } font_info_t;
+
+    typedef struct {
+        doc::slice_t slice;
+        u64 pos;
+    } drawline_select_t;
+
+    typedef struct {
+        u64 line_num;
+        char buf[1024];
+        bool has_newline;
+    } drawline_t;
+
+    typedef enum {
+        ALIGN_BEGIN,
+        ALIGN_CENTER,
+        ALIGN_END,
+    } align_t;
+
     // ##################################################################
     // function declarations (static)
     // ##################################################################
 
-    static void cfg_panel_init_default(cfg_panel_t* cfg);
+    static void cfg_panel_init_default(cfg_panel_t*);
+
+    static bool drawline_next(doc::iter_t*, drawline_select_t*, drawline_t* retv, float drawline_size_x_max, const cfg_panel_t*);
+    static bool get_char(doc::iter_t*, drawline_select_t*, char* retv);
     
-    static bool get_next_draw_line(doc::iter_t* it, doc::slice_t* slice, const char** slice_progress, char* buf, u64 buf_len, bool* has_newline, float buf_size_x_max, const cfg_panel_t* cfg);
+    static size2_t cfg_section_border_size(const cfg_section_t*);
+    static size2_t cfg_section_content_area_size(const cfg_section_t*, size2_t);
 
-    // ##################################################################
-    // constants
-    // ##################################################################
+    static font_info_t calc_font_info(font_t* font);
+    static u64 calc_digits(u64 num);
 
-    static const char* FONT_CHARACTERS_VISIBLE = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
-    static const char* FONT_CHARACTERS_NUM = "0123456789";
+    static void draw_text(font_t*, qtransform_t, float offset_y, const cfg_section_t*, align_t align, const char* text, color_t);
 
     // ##################################################################
     // globals
@@ -127,88 +151,56 @@ namespace ced::ui {
 		size2_t size = dze_window_framebuffer_size();
         const cfg_panel_t* cfg = &s_cfg_panel_default;
 
-        char buf[1024];
+        font_info_t finfo = calc_font_info(cfg->text.font);
+        float line_offset = finfo.size_y + cfg->text.line_spacing;
 
-        float font_size_y = dze_font_sizeof(cfg->text.font, FONT_CHARACTERS_VISIBLE).y;
-        float font_num_size_x_max = 1.0f;
-        buf[1] = '\0';
-        for (const char* c = FONT_CHARACTERS_NUM; *c != '\0'; c++) {
-            buf[0] = *c;
-            float num_size_x = dze_font_sizeof(cfg->text.font, buf).x;
-            if (num_size_x > font_num_size_x_max)
-                font_num_size_x_max = num_size_x;
-        }
-
-        float tm_size_y = size.y;
-        u64 draw_line_num_max = (tm_size_y - 2 * cfg->main.frame.thickness - cfg->main.padding.top - cfg->main.padding.bottom) / (font_size_y + cfg->text.line_spacing);
-        u64 line_num = 1;
-        u64 line_num_max = line_num + draw_line_num_max - 1;
-
-        u64 line_num_max_digits_max = 1;
-        if (line_num_max >= 100000000) { line_num_max_digits_max += 8; line_num_max /= 100000000; }
-        if (line_num_max >= 10000) { line_num_max_digits_max += 4; line_num_max /= 10000; }
-        if (line_num_max >= 100) { line_num_max_digits_max += 2; line_num_max /= 100; }
-        if (line_num_max >= 10) { line_num_max_digits_max += 1; }
+        u64 drawline_max = cfg_section_content_area_size(&cfg->main, size).y /*only y can be used up here*/ / line_offset;
+        u64 line_num_digits_max = calc_digits(drawline_max);
         
-        // left
-        qtransform_t tl = {0};
+        // area - left
+        qtransform_t t_la = {0};
         if (cfg->show_left) {
-            tl.p = pos;
-            tl.s = (size2_t){
-                2 * cfg->left.frame.thickness + cfg->left.padding.left + cfg->left.padding.right + line_num_max_digits_max * font_num_size_x_max,
-                size.y
-            };
-            dze_qrenderer_draw_quad(tl, cfg->left.bg.color);
-            dze_qrenderer_draw_frame(tl, cfg->left.frame.thickness, cfg->left.frame.color);
+            t_la.p = pos;
+            t_la.s = (size2_t){ cfg_section_border_size(&cfg->left).x + line_num_digits_max * finfo.size_x_num, size.y };
+            dze_qrenderer_draw_quad(t_la, cfg->left.bg.color);
+            dze_qrenderer_draw_frame(t_la, cfg->left.frame.thickness, cfg->left.frame.color);
         }
 
-        // main
-        qtransform_t tm = {0};
-        tm.p = (pos2_t){ tl.p.x + tl.s.x, pos.y };
-        tm.s = (size2_t){ size.x - tl.s.x, tm_size_y };
-        dze_qrenderer_draw_quad(tm, cfg->main.bg.color);
-        dze_qrenderer_draw_frame(tm, cfg->main.frame.thickness, cfg->main.frame.color);
+        // area - main
+        qtransform_t t_ma = {0};
+        t_ma.p = (pos2_t){ t_la.p.x + t_la.s.x, pos.y };
+        t_ma.s = (size2_t){ size.x - t_la.s.x, size.y };
+        dze_qrenderer_draw_quad(t_ma, cfg->main.bg.color);
+        dze_qrenderer_draw_frame(t_ma, cfg->main.frame.thickness, cfg->main.frame.color);
 
-        // text
-        float buf_size_x_max = tm.s.x - 2 * cfg->main.frame.thickness - cfg->main.padding.left - cfg->main.padding.right;
+        //
+        size2_t main_content_area_size = cfg_section_content_area_size(&cfg->main, t_ma.s);
 
-        u64 draw_line_idx = 0;
-        doc::slice_t slice = {0};
-        const char* slice_progress = NULL;
-        bool has_newline = true;
-
+        drawline_select_t select = {0};
+        drawline_t drawline = {0}; drawline.has_newline = true;
+        u64 drawline_idx = 0;
         do {
-            if (has_newline) {
+            float line_offset_final = drawline_idx * line_offset;
+
+            // text - left
+            if (drawline.has_newline) {
                 if (cfg->show_left) {
-                    // text - left
                     char line_num_buf[21];
-                    sprintf(line_num_buf, "%lu", line_num);
-                    float line_num_buf_size_x = dze_font_sizeof(cfg->text.font, line_num_buf).x;
-
-                    qtransform_t ttl = {0};
-                    ttl.p = (pos2_t){
-                        tl.p.x + tl.s.x - cfg->left.frame.thickness - cfg->left.padding.right - line_num_buf_size_x,
-                        tl.p.y + cfg->left.frame.thickness + cfg->left.padding.top + draw_line_idx * (cfg->text.line_spacing + font_size_y)
-                    };
-                    dze_qrenderer_draw_text(cfg->text.font, ttl.p, ttl.r, line_num_buf, cfg->text.color[TEXT_COLOR_LEFT]);
+                    sprintf(line_num_buf, "%lu", drawline.line_num + 1);
+                    draw_text(cfg->text.font, t_la, line_offset_final, &cfg->left, ALIGN_END, line_num_buf, cfg->text.color[TEXT_COLOR_LEFT]);
                 }
-
-                line_num++;
             }
 
-            bool has_draw_line = get_next_draw_line(it, &slice, &slice_progress, buf, sizeof(buf), &has_newline, buf_size_x_max, cfg);
-            if (!has_draw_line)
+            //
+            if (!drawline_next(it, &select, &drawline, main_content_area_size.x, cfg))
                 break;
-            // text - main
-            qtransform_t ttm = {0};
-            ttm.p = (pos2_t){
-                tm.p.x + cfg->main.frame.thickness + cfg->main.padding.left,
-                tm.p.y + cfg->main.frame.thickness + cfg->main.padding.top + draw_line_idx * (cfg->text.line_spacing + font_size_y)
-            };
-            dze_qrenderer_draw_text(cfg->text.font, ttm.p, ttm.r, buf, cfg->text.color[TEXT_COLOR_MAIN]);
 
-            draw_line_idx++;
-            if (draw_line_idx >= draw_line_num_max)
+            // text - main
+            draw_text(cfg->text.font, t_ma, line_offset_final, &cfg->main, ALIGN_BEGIN, drawline.buf, cfg->text.color[TEXT_COLOR_MAIN]);
+
+            //
+            drawline_idx++;
+            if (drawline_idx >= drawline_max)
                 break;
         } while(true);
 
@@ -240,69 +232,128 @@ namespace ced::ui {
         cfg->soft_wrap = true;
     }
 
-    static bool get_next_draw_line(doc::iter_t* it, doc::slice_t* slice, const char** slice_progress, char* buf, u64 buf_len, bool* has_newline, float buf_size_x_max, const cfg_panel_t* cfg) {
-        const char* pread;
-        const char* pread_end;
-        char* pwrite = buf;
-        char* pwrite_end = buf + buf_len; // TODO: IMPL: OOB
+    static bool drawline_next(doc::iter_t* it, drawline_select_t* select, drawline_t* retv, float drawline_size_x_max, const cfg_panel_t* cfg) {
+        char* pbuf = retv->buf;
+        // TODO: IMPL: OOB for pbuf
 
-        *has_newline = false;
+        retv->has_newline = false;
 
-        bool skip_until_next_line = false;
-        do {
-            if (*slice_progress == NULL) {
-                if (!doc::next(it, slice)) {
-                    if (pwrite == buf) {
-                        return false;
-                    }
+        char c;
+        while (get_char(it, select, &c)) {
+            char* pbuf_backup = pbuf;
+
+            switch (c) {
+                case '\n':
+                    retv->line_num++;
+                    retv->has_newline = true;
                     goto ret; // yay !! goto !!
-                }
-                *slice_progress = slice->buf;
+                case '\r': break;
+                case '\t':
+                    for (u64 i=0; i<cfg->text.tab_space_count; i++)
+                        *pbuf++ = ' ';
+                    break;
+                default:
+                    *pbuf++ = c;
+                    break;
             }
 
-            pread = *slice_progress;
-            pread_end = slice->buf + slice->len;
+            // TODO: IMPROVE: do not calculate everything for each char
+            *pbuf = '\0';
+            size2_t size = dze_font_sizeof(cfg->text.font, retv->buf);
+            if (size.x > drawline_size_x_max) {
+                pbuf = pbuf_backup;
+                select->pos--;
 
-            while (pread != pread_end) {
-                char c = *pread++;
-                if (skip_until_next_line) {
-                    if (c == '\n')
-                        goto ret; // yay !! goto !!
-                    continue;
-                }
-                char* pwrite_save = pwrite;
-                switch (c) {
-                    case '\n':
-                        *has_newline = true;
-                        goto ret; // yay !! goto !!
-                    case '\r': break;
-                    case '\t':
-                        for (u64 i=0; i<cfg->text.tab_space_count; i++)
-                            *pwrite++ = ' ';
-                        break;
-                    default:
-                        *pwrite++ = c;
-                        break;
-                }
+                if (cfg->soft_wrap)
+                    goto ret; // yay !! goto !!
 
-                *pwrite = '\0';
-                float buf_size_x = dze_font_sizeof(cfg->text.font, buf).x; // TODO: IMPROVE: do not calculate everything for each char
-                if (buf_size_x > buf_size_x_max) {
-                    pwrite = pwrite_save;
-                    pread--;
-                    if (cfg->soft_wrap)
+                while (get_char(it, select, &c)) {
+                    if (c == '\n') {
+                        retv->line_num++;
                         goto ret; // yay !! goto !!
-                    skip_until_next_line = true;
+                    }
                 }
             }
+        }
 
-            *slice_progress = NULL;
-        } while (true);
-
+        return pbuf != retv->buf;
     ret:
-        *slice_progress = pread;
-        *pwrite = '\0';
+        *pbuf = '\0';
         return true;
+    }
+
+    static bool get_char(doc::iter_t* it, drawline_select_t* select, char* retv) {
+        // TODO: IMPROVE: fetching each character individually is not the way to go. but its fine for now
+        if (select->pos >= select->slice.len) {
+            if (!doc::next(it, &select->slice))
+                return false;
+            select->pos = 0;
+            // expect new slice to at least contain 1 character
+        }
+        *retv = select->slice.buf[select->pos++];
+        return true;
+    }
+
+    static font_info_t calc_font_info(font_t* font) {
+        static const char* FONT_CHARACTERS_VISIBLE = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+        static const char* FONT_CHARACTERS_NUM = "0123456789";
+
+        font_info_t info;
+
+        info.size_y = dze_font_sizeof(font, FONT_CHARACTERS_VISIBLE).y;
+        info.size_x_num = 1.0f;
+        char buf_num[2]; buf_num[1] = '\0';
+        for (const char* c = FONT_CHARACTERS_NUM; *c != '\0'; c++) {
+            buf_num[0] = *c;
+            float size_x_num = dze_font_sizeof(font, buf_num).x;
+            if (size_x_num > info.size_x_num)
+                info.size_x_num = size_x_num;
+        }
+
+        return info;
+    }
+
+    static u64 calc_digits(u64 num) {
+        u64 digits = 1;
+        if (num >= 100000000) { digits += 8; num /= 100000000; }
+        if (num >= 10000) { digits += 4; num /= 10000; }
+        if (num >= 100) { digits += 2; num /= 100; }
+        if (num >= 10) { digits += 1; }
+        return digits;
+    }
+
+    static size2_t cfg_section_border_size(const cfg_section_t* cfg) {
+        return (size2_t){
+            2 * cfg->frame.thickness + cfg->padding.left + cfg->padding.right,
+            2 * cfg->frame.thickness + cfg->padding.top + cfg->padding.bottom,
+        };
+    }
+
+    static size2_t cfg_section_content_area_size(const cfg_section_t* cfg, size2_t size) {
+        size2_t border = cfg_section_border_size(cfg);
+        return glms_vec2_sub(size, border);
+    }
+
+    static void draw_text(font_t* font, qtransform_t area, float offset_y, const cfg_section_t* section, align_t align, const char* text, color_t color) {
+        size2_t text_size;
+        if (align != ALIGN_BEGIN)
+            text_size = dze_font_sizeof(font, text);
+
+        qtransform_t t = {0};
+        switch (align) {
+            case ALIGN_BEGIN:
+                t.p.x = area.p.x + section->frame.thickness + section->padding.left;
+                break;
+            case ALIGN_CENTER:
+                t.p.x = area.p.x + (area.s.x - text_size.x) / 2.0f;
+                break;
+            case ALIGN_END:
+                t.p.x = area.p.x + area.s.x - section->frame.thickness - section->padding.right - text_size.x;
+                break;
+        }
+        t.p.y = area.p.y + section->frame.thickness + section->padding.top + offset_y;
+        
+        dze_qrenderer_draw_text(font, t.p, t.r, text, color);
     }
 
 }
