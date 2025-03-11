@@ -36,11 +36,17 @@ namespace ced::ui {
         rect_offset_t padding;
     } cfg_section_t;
 
+    typedef enum {
+        TEXT_COLOR_MAIN,
+        TEXT_COLOR_LEFT,
+        TEXT_COLOR_COUNT,
+    } color_text_t;
+
     typedef struct {
         font_t* font;
-        color_t color;
-        float line_spacing;
+        color_t color[TEXT_COLOR_COUNT];
 
+        float line_spacing;
         u64 tab_space_count;
     } cfg_text_t;
 
@@ -181,7 +187,7 @@ namespace ced::ui {
                     tl.p.x + tl.s.x - cfg->left.frame.thickness - cfg->left.padding.right - line_num_buf_size_x,
                     tl.p.y + cfg->left.frame.thickness + cfg->left.padding.top + draw_line_idx * (cfg->text.line_spacing + font_size_y)
                 };
-                dze_qrenderer_draw_text(cfg->text.font, ttl.p, ttl.r, line_num_buf, cfg->text.color);
+                dze_qrenderer_draw_text(cfg->text.font, ttl.p, ttl.r, line_num_buf, cfg->text.color[TEXT_COLOR_LEFT]);
             }
 
             // text - main
@@ -190,7 +196,7 @@ namespace ced::ui {
                 tm.p.x + cfg->main.frame.thickness + cfg->main.padding.left,
                 tm.p.y + cfg->main.frame.thickness + cfg->main.padding.top + draw_line_idx * (cfg->text.line_spacing + font_size_y)
             };
-            dze_qrenderer_draw_text(cfg->text.font, ttm.p, ttm.r, buf, cfg->text.color);
+            dze_qrenderer_draw_text(cfg->text.font, ttm.p, ttm.r, buf, cfg->text.color[TEXT_COLOR_MAIN]);
 
             line_num++;
             draw_line_idx++;
@@ -219,7 +225,8 @@ namespace ced::ui {
         cfg->left.padding = (rect_offset_t){ 10.0f, 5.0f, 5.0f, 5.0f };
 
         cfg->text.font = &s_font_default;
-        cfg->text.color = COLOR_WHITE;
+        cfg->text.color[TEXT_COLOR_MAIN] = COLOR_WHITE;
+        cfg->text.color[TEXT_COLOR_LEFT] = COLOR_U8(150, 150, 150);
         cfg->text.line_spacing = 5.0f;
         cfg->text.tab_space_count = 4;
 
