@@ -55,7 +55,8 @@ namespace ced::ui {
         cfg_section_t left;
         cfg_text_t text;
 
-        bool left_is_enabled;
+        bool show_left;
+        bool soft_wrap;
     } cfg_panel_t;
 
     // ##################################################################
@@ -151,7 +152,7 @@ namespace ced::ui {
         
         // left
         qtransform_t tl = {0};
-        if (cfg->left_is_enabled) {
+        if (cfg->show_left) {
             tl.p = pos;
             tl.s = (size2_t){
                 2 * cfg->left.frame.thickness + cfg->left.padding.left + cfg->left.padding.right + line_num_max_digits_max * font_num_size_x_max,
@@ -174,22 +175,30 @@ namespace ced::ui {
         u64 draw_line_idx = 0;
         doc::slice_t slice = {0};
         const char* slice_progress = NULL;
-        bool has_newline = false; // TODO: IMPL: not used (soft wrap)
-        while (get_next_draw_line(it, &slice, &slice_progress, buf, sizeof(buf), &has_newline, buf_size_x_max, cfg)) {
-            if (cfg->left_is_enabled) {
-                // text - left
-                char line_num_buf[21];
-                sprintf(line_num_buf, "%lu", line_num);
-                float line_num_buf_size_x = dze_font_sizeof(cfg->text.font, line_num_buf).x;
+        bool has_newline = true;
 
-                qtransform_t ttl = {0};
-                ttl.p = (pos2_t){
-                    tl.p.x + tl.s.x - cfg->left.frame.thickness - cfg->left.padding.right - line_num_buf_size_x,
-                    tl.p.y + cfg->left.frame.thickness + cfg->left.padding.top + draw_line_idx * (cfg->text.line_spacing + font_size_y)
-                };
-                dze_qrenderer_draw_text(cfg->text.font, ttl.p, ttl.r, line_num_buf, cfg->text.color[TEXT_COLOR_LEFT]);
+        do {
+            if (has_newline) {
+                if (cfg->show_left) {
+                    // text - left
+                    char line_num_buf[21];
+                    sprintf(line_num_buf, "%lu", line_num);
+                    float line_num_buf_size_x = dze_font_sizeof(cfg->text.font, line_num_buf).x;
+
+                    qtransform_t ttl = {0};
+                    ttl.p = (pos2_t){
+                        tl.p.x + tl.s.x - cfg->left.frame.thickness - cfg->left.padding.right - line_num_buf_size_x,
+                        tl.p.y + cfg->left.frame.thickness + cfg->left.padding.top + draw_line_idx * (cfg->text.line_spacing + font_size_y)
+                    };
+                    dze_qrenderer_draw_text(cfg->text.font, ttl.p, ttl.r, line_num_buf, cfg->text.color[TEXT_COLOR_LEFT]);
+                }
+
+                line_num++;
             }
 
+            bool has_draw_line = get_next_draw_line(it, &slice, &slice_progress, buf, sizeof(buf), &has_newline, buf_size_x_max, cfg);
+            if (!has_draw_line)
+                break;
             // text - main
             qtransform_t ttm = {0};
             ttm.p = (pos2_t){
@@ -198,13 +207,10 @@ namespace ced::ui {
             };
             dze_qrenderer_draw_text(cfg->text.font, ttm.p, ttm.r, buf, cfg->text.color[TEXT_COLOR_MAIN]);
 
-            line_num++;
             draw_line_idx++;
             if (draw_line_idx >= draw_line_num_max)
                 break;
-
-            // TODO: IMPROVE: line number of last trailing newline is not shown
-        }
+        } while(true);
 
         // TODO: IMPL: scrolling
     }
@@ -230,7 +236,8 @@ namespace ced::ui {
         cfg->text.line_spacing = 5.0f;
         cfg->text.tab_space_count = 4;
 
-        cfg->left_is_enabled = true;
+        cfg->show_left = true;
+        cfg->soft_wrap = true;
     }
 
     static bool get_next_draw_line(doc::iter_t* it, doc::slice_t* slice, const char** slice_progress, char* buf, u64 buf_len, bool* has_newline, float buf_size_x_max, const cfg_panel_t* cfg) {
@@ -263,20 +270,28 @@ namespace ced::ui {
                         goto ret; // yay !! goto !!
                     continue;
                 }
+                char* pwrite_save = pwrite;
                 switch (c) {
-                    case '\n': *has_newline = true; goto ret; // yay !! goto !!
+                    case '\n':
+                        *has_newline = true;
+                        goto ret; // yay !! goto !!
                     case '\r': break;
                     case '\t':
                         for (u64 i=0; i<cfg->text.tab_space_count; i++)
                             *pwrite++ = ' ';
                         break;
-                    default: *pwrite++ = c; break;
+                    default:
+                        *pwrite++ = c;
+                        break;
                 }
 
                 *pwrite = '\0';
                 float buf_size_x = dze_font_sizeof(cfg->text.font, buf).x; // TODO: IMPROVE: do not calculate everything for each char
                 if (buf_size_x > buf_size_x_max) {
-                    pwrite--;
+                    pwrite = pwrite_save;
+                    pread--;
+                    if (cfg->soft_wrap)
+                        goto ret; // yay !! goto !!
                     skip_until_next_line = true;
                 }
             }
