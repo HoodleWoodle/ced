@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include <ctype.h>
 #include <zwerg.h>
 
 // ##################################################################
@@ -57,6 +58,7 @@ namespace ced::ui {
 
         bool show_left;
         bool soft_wrap;
+        bool word_wrap;
     } cfg_panel_t;
 
     typedef struct {
@@ -230,6 +232,7 @@ namespace ced::ui {
 
         cfg->show_left = true;
         cfg->soft_wrap = true;
+        cfg->word_wrap = true;
     }
 
     static bool drawline_next(doc::iter_t* it, drawline_select_t* select, drawline_t* retv, float drawline_size_x_max, const cfg_panel_t* cfg) {
@@ -248,6 +251,8 @@ namespace ced::ui {
                     retv->has_newline = true;
                     goto ret; // yay !! goto !!
                 case '\r': break;
+                case '\v': break;
+                case '\f': break;
                 case '\t':
                     for (u64 i=0; i<cfg->text.tab_space_count; i++)
                         *pbuf++ = ' ';
@@ -260,18 +265,29 @@ namespace ced::ui {
             // TODO: IMPROVE: do not calculate everything for each char
             *pbuf = '\0';
             size2_t size = dze_font_sizeof(cfg->text.font, retv->buf);
-            if (size.x > drawline_size_x_max) {
-                pbuf = pbuf_backup;
-                select->pos--;
+            if (size.x <= drawline_size_x_max)
+                continue;
 
-                if (cfg->soft_wrap)
+            pbuf = pbuf_backup;
+            select->pos--;
+
+            if (cfg->soft_wrap) {
+                if (!cfg->word_wrap)
                     goto ret; // yay !! goto !!
-
-                while (get_char(it, select, &c)) {
-                    if (c == '\n') {
-                        retv->line_num++;
+                    
+                while (pbuf != retv->buf) {
+                    if (isspace(*pbuf))
                         goto ret; // yay !! goto !!
-                    }
+                    pbuf--;
+                }
+                pbuf = pbuf_backup;
+                goto ret; // yay !! goto !!
+            }
+
+            while (get_char(it, select, &c)) {
+                if (c == '\n') {
+                    retv->line_num++;
+                    goto ret; // yay !! goto !!
                 }
             }
         }
