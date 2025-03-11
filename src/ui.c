@@ -58,7 +58,7 @@ namespace ced::ui {
 
     static void cfg_panel_init_default(cfg_panel_t* cfg);
     
-    static bool get_next_draw_line(doc::iter_t* it, doc::slice_t* slice, const char** slice_progress, char* buf, u64 buf_len, const cfg_panel_t* cfg);
+    static bool get_next_draw_line(doc::iter_t* it, doc::slice_t* slice, const char** slice_progress, char* buf, u64 buf_len, bool* has_newline, float buf_size_x_max, const cfg_panel_t* cfg);
 
     // ##################################################################
     // constants
@@ -133,7 +133,7 @@ namespace ced::ui {
         }
 
         float tm_size_y = size.y;
-        u64 draw_line_num_max = (tm_size_y - 2 * cfg->main.frame.thickness) / (font_size_y + cfg->text.line_spacing);
+        u64 draw_line_num_max = (tm_size_y - 2 * cfg->main.frame.thickness - cfg->main.padding.top - cfg->main.padding.bottom) / (font_size_y + cfg->text.line_spacing);
         u64 line_num = 1;
         u64 line_num_max = line_num + draw_line_num_max - 1;
 
@@ -163,10 +163,13 @@ namespace ced::ui {
         dze_qrenderer_draw_frame(tm, cfg->main.frame.thickness, cfg->main.frame.color);
 
         // text
+        float buf_size_x_max = tm.s.x - 2 * cfg->main.frame.thickness - cfg->main.padding.left - cfg->main.padding.right;
+
         u64 draw_line_idx = 0;
         doc::slice_t slice = {0};
         const char* slice_progress = NULL;
-        while (get_next_draw_line(it, &slice, &slice_progress, buf, sizeof(buf), cfg)) {
+        bool has_newline = false; // TODO: IMPL: not used (soft wrap)
+        while (get_next_draw_line(it, &slice, &slice_progress, buf, sizeof(buf), &has_newline, buf_size_x_max, cfg)) {
             if (cfg->left_is_enabled) {
                 // text - left
                 char line_num_buf[21];
@@ -223,14 +226,15 @@ namespace ced::ui {
         cfg->left_is_enabled = true;
     }
 
-    static bool get_next_draw_line(doc::iter_t* it, doc::slice_t* slice, const char** slice_progress, char* buf, u64 buf_len, const cfg_panel_t* cfg) {
-        // TODO: IMPL: handle cutting lines being to long to be fully drawn
-
+    static bool get_next_draw_line(doc::iter_t* it, doc::slice_t* slice, const char** slice_progress, char* buf, u64 buf_len, bool* has_newline, float buf_size_x_max, const cfg_panel_t* cfg) {
         const char* pread;
         const char* pread_end;
         char* pwrite = buf;
         char* pwrite_end = buf + buf_len; // TODO: IMPL: OOB
 
+        *has_newline = false;
+
+        bool skip_until_next_line = false;
         do {
             if (*slice_progress == NULL) {
                 if (!doc::next(it, slice)) {
@@ -247,14 +251,26 @@ namespace ced::ui {
 
             while (pread != pread_end) {
                 char c = *pread++;
+                if (skip_until_next_line) {
+                    if (c == '\n')
+                        goto ret; // yay !! goto !!
+                    continue;
+                }
                 switch (c) {
-                    case '\n': goto ret; // yay !! goto !!
+                    case '\n': *has_newline = true; goto ret; // yay !! goto !!
                     case '\r': break;
                     case '\t':
                         for (u64 i=0; i<cfg->text.tab_space_count; i++)
                             *pwrite++ = ' ';
                         break;
                     default: *pwrite++ = c; break;
+                }
+
+                *pwrite = '\0';
+                float buf_size_x = dze_font_sizeof(cfg->text.font, buf).x; // TODO: IMPROVE: do not calculate everything for each char
+                if (buf_size_x > buf_size_x_max) {
+                    pwrite--;
+                    skip_until_next_line = true;
                 }
             }
 
